@@ -1,4 +1,9 @@
 # gcpadder-linux
+
+Fork only remaps buttons and adds configuration for ip address instead of hardcoding it.
+
+### Original:
+
 Userspace Linux driver for the Wii homebrew application [GCPadder](https://github.com/InvoxiPlayGames/GCPadder), originally by InvoxiPlayGames.
 
 To build this, you should edit the `IP_ADDR` macro in main.cpp to point towards your Wii's local IP address. Then run GCC:

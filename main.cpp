@@ -13,6 +13,10 @@
 #include <unistd.h>
 
 #include <iostream>
+#include <fstream>
+#include <string>
+#include <cstring>
+#include <limits>
 
 struct NETPADData {
   uint16_t buttons;
@@ -41,8 +45,69 @@ enum {
 
 #define PAYLOAD "\x09\xAD\x09\xAD"
 
-#define IP_ADDR "192.168.1.115"
-#define PORT "2477"
+struct Config {
+  std::string ip;
+  std::string port;
+};
+
+// Helper to trim whitespace from both ends
+std::string trim(const std::string& s) {
+  auto start = s.begin();
+  while (start != s.end() && std::isspace(*start)) ++start;
+  auto end = s.end();
+  while (end != start && std::isspace(*(end-1))) --end;
+  return std::string(start, end);
+}
+
+Config load_config() {
+  Config cfg;
+  std::ifstream file("gamecube_controller.ini");
+  if (file.is_open()) {
+    std::string line;
+    while (std::getline(file, line)) {
+      // Remove carriage return if present (Windows)
+      if (!line.empty() && line.back() == '\r') line.pop_back();
+      if (line.find("IP=") == 0) {
+        cfg.ip = trim(line.substr(3));
+      } else if (line.find("PORT=") == 0) {
+        cfg.port = trim(line.substr(5));
+      }
+    }
+    file.close();
+    std::cout << "Loaded config: IP='" << cfg.ip << "', PORT='" << cfg.port << "'" << std::endl;
+  } else {
+    std::cout << "No config file found." << std::endl;
+  }
+  return cfg;
+}
+
+void save_config(const Config& cfg) {
+  std::ofstream file("gamecube_controller.ini");
+  if (file.is_open()) {
+    file << "IP=" << trim(cfg.ip) << "\n";
+    file << "PORT=" << trim(cfg.port) << "\n";
+    file.close();
+    std::cout << "Saved config: IP='" << trim(cfg.ip) << "', PORT='" << trim(cfg.port) << "'" << std::endl;
+  } else {
+    std::cerr << "Warning: Could not save config file.\n";
+  }
+}
+
+Config prompt_user() {
+  Config cfg;
+  std::cout << "Enter the IP address of the Wii Console: ";
+  std::getline(std::cin, cfg.ip);
+
+  std::cout << "Enter the port (default 2477): ";
+  std::string portInput;
+  std::getline(std::cin, portInput);
+  if (portInput.empty()) {
+    cfg.port = "2477";
+  } else {
+    cfg.port = portInput;
+  }
+  return cfg;
+}
 
 int resolve_helper(const char* hostname, int family, const char* service,
                    sockaddr_storage* pAddr) {
@@ -65,6 +130,14 @@ int main(int argc, char* argv[]) {
   int fd;
   int rc = 1;
   int sock = socket(AF_INET, SOCK_DGRAM, 0);
+
+  // --- Load or prompt for configuration ---
+  Config config = load_config();
+  if (config.ip.empty()) {
+    config = prompt_user();
+    save_config(config);
+  }
+  std::cout << "Connecting to " << config.ip << ":" << config.port << std::endl;
 
   struct input_absinfo absx;
   absx.flat = 10;
@@ -132,7 +205,7 @@ int main(int argc, char* argv[]) {
   libevdev_enable_event_code(dev, EV_KEY, BTN_EAST, NULL);
   libevdev_enable_event_code(dev, EV_KEY, BTN_NORTH, NULL);
   libevdev_enable_event_code(dev, EV_KEY, BTN_WEST, NULL);
-  libevdev_enable_event_code(dev, EV_KEY, BTN_Z, NULL);
+  libevdev_enable_event_code(dev, EV_KEY, BTN_TR2, NULL); // Previously BTN_Z
   libevdev_enable_event_code(dev, EV_KEY, BTN_TL, NULL);
   libevdev_enable_event_code(dev, EV_KEY, BTN_TR, NULL);
   libevdev_enable_event_code(dev, EV_KEY, BTN_START, NULL);
@@ -161,7 +234,7 @@ int main(int argc, char* argv[]) {
   }
 
   sockaddr_storage addrDest = {};
-  result = resolve_helper(IP_ADDR, AF_INET, PORT, &addrDest);
+  result = resolve_helper(config.ip.c_str(), AF_INET, config.port.c_str(), &addrDest);
   if (result != 0) {
     int lasterror = errno;
     std::cout << "error: " << lasterror;
@@ -197,12 +270,12 @@ int main(int argc, char* argv[]) {
     libevdev_uinput_write_event(uidev, EV_KEY, BTN_SOUTH,
                                 (paddata.buttons & A) == A ? 1 : 0);
     libevdev_uinput_write_event(uidev, EV_KEY, BTN_EAST,
-                                (paddata.buttons & X) == X ? 1 : 0);
+                                (paddata.buttons & B) == B ? 1 : 0); // Previously X
     libevdev_uinput_write_event(uidev, EV_KEY, BTN_NORTH,
-                                (paddata.buttons & Y) == Y ? 1 : 0);
+                                (paddata.buttons & X) == X ? 1 : 0); // Previously Y
     libevdev_uinput_write_event(uidev, EV_KEY, BTN_WEST,
-                                (paddata.buttons & B) == B ? 1 : 0);
-    libevdev_uinput_write_event(uidev, EV_KEY, BTN_Z,
+                                (paddata.buttons & Y) == Y ? 1 : 0); // Previously B
+    libevdev_uinput_write_event(uidev, EV_KEY, BTN_TR2,              // Previously BTN_Z
                                 (paddata.buttons & Z) == Z ? 1 : 0);
     libevdev_uinput_write_event(uidev, EV_KEY, BTN_TL,
                                 (paddata.buttons & TRIG_L) == TRIG_L ? 1 : 0);
