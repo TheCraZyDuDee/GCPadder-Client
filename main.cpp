@@ -250,6 +250,8 @@ int main(int argc, char* argv[]) {
 
   std::cout << result << " bytes sent" << std::endl;
 
+  uint16_t prevButtons = 0xFFFF;   // start with a value that's never equal to real data
+
   while (true) {
     result = recv(sock, &paddata, 8, 0);
     if (result == -1) {
@@ -258,7 +260,11 @@ int main(int argc, char* argv[]) {
       exit(1);
     }
 
-    std::cout << "Buttons pressed: " << paddata.buttons << "\n";
+    // Only print when the button state actually changes
+    if (paddata.buttons != prevButtons) {
+      std::cout << "Buttons: " << paddata.buttons << "\n";
+      prevButtons = paddata.buttons;
+    }
 
     libevdev_uinput_write_event(uidev, EV_ABS, ABS_X, paddata.stickX);
     libevdev_uinput_write_event(uidev, EV_ABS, ABS_Y, -paddata.stickY);
