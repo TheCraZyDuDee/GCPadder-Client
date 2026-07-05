@@ -11,12 +11,15 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <ncurses.h>
+#include <signal.h>
 
 #include <iostream>
 #include <fstream>
 #include <string>
 #include <cstring>
 #include <limits>
+#include <vector>
 
 struct NETPADData {
   uint16_t buttons;
@@ -41,13 +44,35 @@ enum {
   Z = 0x1000,
   TRIG_R = 0x2000,
   TRIG_L = 0x4000
-} btn_values;
+};
 
 #define PAYLOAD "\x09\xAD\x09\xAD"
 
 struct Config {
   std::string ip;
   std::string port;
+};
+
+struct ButtonInfo {
+  const char* name;
+  uint16_t bit;
+  int count;
+  bool prevState;
+};
+
+std::vector<ButtonInfo> buttons = {
+  {"A",      A, 0, false},
+  {"B",      B, 0, false},
+  {"X",      X, 0, false},
+  {"Y",      Y, 0, false},
+  {"Start",  START, 0, false},
+  {"D-Left", D_LEFT, 0, false},
+  {"D-Right",D_RIGHT, 0, false},
+  {"D-Down", D_DOWN, 0, false},
+  {"D-Up",   D_UP, 0, false},
+  {"Z",      Z, 0, false},
+  {"R",      TRIG_R, 0, false},
+  {"L",      TRIG_L, 0, false}
 };
 
 std::string trim(const std::string& s) {
@@ -72,9 +97,6 @@ Config load_config() {
       }
     }
     file.close();
-    std::cout << "Loaded config: IP='" << cfg.ip << "', PORT='" << cfg.port << "'" << std::endl;
-  } else {
-    std::cout << "No config file found." << std::endl;
   }
   return cfg;
 }
@@ -85,9 +107,6 @@ void save_config(const Config& cfg) {
     file << "IP=" << trim(cfg.ip) << "\n";
     file << "PORT=" << trim(cfg.port) << "\n";
     file.close();
-    std::cout << "Saved config: IP='" << trim(cfg.ip) << "', PORT='" << trim(cfg.port) << "'" << std::endl;
-  } else {
-    std::cerr << "Warning: Could not save config file.\n";
   }
 }
 
@@ -95,7 +114,6 @@ Config prompt_user() {
   Config cfg;
   std::cout << "Enter the IP address of the Wii Console: ";
   std::getline(std::cin, cfg.ip);
-
   std::cout << "Enter the port (default 2477): ";
   std::string portInput;
   std::getline(std::cin, portInput);
@@ -122,7 +140,54 @@ int resolve_helper(const char* hostname, int family, const char* service,
   return result;
 }
 
+WINDOW* mainwin;
+volatile sig_atomic_t resize_flag = 0;
+
+void handle_winch(int sig) {
+  resize_flag = 1;
+}
+
+void init_ncurses() {
+  mainwin = initscr();
+  cbreak();
+  noecho();
+  curs_set(0);
+  keypad(mainwin, TRUE);
+  nodelay(mainwin, TRUE);
+  clear();
+}
+
+void draw_ui(const NETPADData& data, const std::vector<ButtonInfo>& btnList, const std::string& pressedNames, const std::string& connectionInfo) {
+  int row = 0;
+  
+  mvprintw(row++, 0, "%s", connectionInfo.c_str());
+  row++;
+  mvprintw(row++, 0, "===== Stick & Trigger Values =====");
+  row++;
+  mvprintw(row++, 0, "%-10s : %5d", "Analog Stick X", data.stickX);
+  mvprintw(row++, 0, "%-10s : %5d", "Analog Stick Y", data.stickY);
+  mvprintw(row++, 0, "%-14s : %5d", "C-Stick X", data.substickX);
+  mvprintw(row++, 0, "%-14s : %5d", "C-Stick Y", data.substickY);
+  mvprintw(row++, 0, "%-14s : %5d", "Trigger L", data.triggerL);
+  mvprintw(row++, 0, "%-14s : %5d", "Trigger R", data.triggerR);
+  
+  row++;
+  mvprintw(row++, 0, "===== Button Count =====");
+  row++;
+  move(row, 0);
+  clrtoeol();
+  mvprintw(row++, 0, "Pressed Buttons: %s", pressedNames.empty() ? "" : pressedNames.c_str());
+  row++;
+  for (const auto& b : btnList) {
+    mvprintw(row++, 0, "%-14s : %5d", b.name, b.count);
+  }
+  
+  refresh();
+}
+
 int main(int argc, char* argv[]) {
+  signal(SIGWINCH, handle_winch);
+
   int result = 0;
   int sock = socket(AF_INET, SOCK_DGRAM, 0);
 
@@ -131,7 +196,6 @@ int main(int argc, char* argv[]) {
     config = prompt_user();
     save_config(config);
   }
-  std::cout << "Connecting to " << config.ip << ":" << config.port << std::endl;
 
   struct input_absinfo absx;
   absx.flat = 10;
@@ -219,7 +283,7 @@ int main(int argc, char* argv[]) {
                                               &uidev);
   if (result != 0) {
     int lasterror = errno;
-    std::cout << "error on creating uinput device: " << strerror(lasterror);
+    std::cerr << "error on creating uinput device: " << strerror(lasterror);
     exit(1);
   }
 
@@ -228,7 +292,7 @@ int main(int argc, char* argv[]) {
   result = bind(sock, (sockaddr*)&addrListen, sizeof(addrListen));
   if (result == -1) {
     int lasterror = errno;
-    std::cout << "error: " << lasterror;
+    std::cerr << "error: " << lasterror;
     exit(1);
   }
 
@@ -236,32 +300,34 @@ int main(int argc, char* argv[]) {
   result = resolve_helper(config.ip.c_str(), AF_INET, config.port.c_str(), &addrDest);
   if (result != 0) {
     int lasterror = errno;
-    std::cout << "error: " << lasterror;
+    std::cerr << "error: " << lasterror;
     exit(1);
   }
 
   result = sendto(sock, PAYLOAD, 4, 0, (sockaddr*)&addrDest, sizeof(addrDest));
   if (result != 4) {
     int lasterror = errno;
-    std::cout << "error: " << lasterror;
+    std::cerr << "error: " << lasterror;
     exit(1);
   }
 
-  std::cout << result << " bytes sent" << std::endl;
+  init_ncurses();
 
-  uint16_t prevButtons = 0xFFFF;
+  std::string connectionInfo = "Connected to: " + config.ip + ":" + config.port;
 
   while (true) {
+    if (resize_flag) {
+      resize_flag = 0;
+      resizeterm(0, 0);
+      clear();
+    }
+
     result = recv(sock, &paddata, 8, 0);
     if (result == -1) {
       int lasterror = errno;
-      std::cout << "error: " << lasterror;
+      endwin();
+      std::cerr << "error: " << lasterror;
       exit(1);
-    }
-
-    if (paddata.buttons != prevButtons) {
-      std::cout << "Buttons: " << paddata.buttons << "\n";
-      prevButtons = paddata.buttons;
     }
 
     libevdev_uinput_write_event(uidev, EV_ABS, ABS_X, paddata.stickX);
@@ -297,7 +363,23 @@ int main(int argc, char* argv[]) {
                                 (paddata.buttons & D_RIGHT) == D_RIGHT ? 1 : 0);
 
     libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 0);
+
+    std::string pressedNames;
+    for (auto& b : buttons) {
+      bool pressed = (paddata.buttons & b.bit) != 0;
+      if (pressed && !b.prevState) {
+        b.count++;
+      }
+      b.prevState = pressed;
+      if (pressed) {
+        if (!pressedNames.empty()) pressedNames += ", ";
+        pressedNames += b.name;
+      }
+    }
+
+    draw_ui(paddata, buttons, pressedNames, connectionInfo);
   }
 
+  endwin();
   return 0;
 }
