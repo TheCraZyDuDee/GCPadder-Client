@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=GCPadder Client
+Comment=An Application to receive Gamecube Controller inputs from a modded Wii.
+Exec=gcpadder
+Icon=GCPadder-Linux-Fork-Icon
+Terminal=true
+Type=Application
+Categories=Utility;System;

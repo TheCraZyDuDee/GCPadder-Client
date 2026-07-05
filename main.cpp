@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <ncurses.h>
 #include <signal.h>
@@ -83,9 +84,25 @@ std::string trim(const std::string& s) {
   return std::string(start, end);
 }
 
+std::string get_config_path() {
+  const char* home = getenv("HOME");
+  if (!home) {
+    return "gcpadder.ini";
+  }
+  return std::string(home) + "/.config/gcpadder/gcpadder.ini";
+}
+
+void ensure_config_dir() {
+  const char* home = getenv("HOME");
+  if (!home) return;
+  std::string dir = std::string(home) + "/.config/gcpadder";
+  mkdir(dir.c_str(), 0700);
+}
+
 Config load_config() {
   Config cfg;
-  std::ifstream file("gamecube_controller.ini");
+  std::string path = get_config_path();
+  std::ifstream file(path);
   if (file.is_open()) {
     std::string line;
     while (std::getline(file, line)) {
@@ -102,7 +119,9 @@ Config load_config() {
 }
 
 void save_config(const Config& cfg) {
-  std::ofstream file("gamecube_controller.ini");
+  ensure_config_dir();
+  std::string path = get_config_path();
+  std::ofstream file(path);
   if (file.is_open()) {
     file << "IP=" << trim(cfg.ip) << "\n";
     file << "PORT=" << trim(cfg.port) << "\n";
