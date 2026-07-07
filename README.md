@@ -1,4 +1,4 @@
-# gcpadder-linux-fork
+# GCPadder Client
 <img src="https://repository-images.githubusercontent.com/1264737192/249ff6f0-849e-43db-b082-450b1c604306" width="50%">
 
 Userspace Linux driver for the Wii homebrew application [GCPadder](https://github.com/InvoxiPlayGames/GCPadder), originally by [InvoxiPlayGames](https://github.com/InvoxiPlayGames).
